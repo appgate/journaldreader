@@ -1,4 +1,4 @@
-module appgate.com/journaldreader
+module github.com/appgate/journaldreader/journaldreader
 
 go 1.22.6
 
