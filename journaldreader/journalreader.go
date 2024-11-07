@@ -51,6 +51,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"os"
 	"unsafe"
+	"strings"
 )
 
 const HEADER_SIZE = 208            //struct.calcsize('<8s 2I B 7x 16s 16s 16s 16s 15Q')
@@ -373,6 +374,46 @@ func (j *SdjournalReader) Close() error {
 	return nil
 }
 
+/*
+ * Returns the next entry in the log file
+ *
+ * The map is a key-value store containing the fields in the entry
+ * the boolean indicates wether further values can be read
+ * and the error indicates if there were any errors.
+ *
+ * In general when encountering an error it is no longer possible to
+ * read any further in the file.
+ */
+func (j *SdjournalReader) Next() (map[string]string, bool, error) {
+	offset, err := j._next_entry_offset()
+
+	if err != nil {
+		return nil, false, err
+	}
+
+	if offset == uint64(0) {
+		return nil, false, nil
+	}
+	offsetdata, err := j._loadDataOffsetsFromEntry(offset)
+	if err != nil {
+		return nil, false, err
+	}
+
+	r := make(map[string]string)
+
+	for i := 0; i < len(offsetdata); i++ {
+		buf, err := j._loadData(offsetdata[i])
+		if err != nil {
+			return nil, false, err
+		}
+		separated := strings.SplitN(string(buf), "=", 2)
+		name := separated[0]
+		value := separated[1]
+		r[name] = value
+	}
+	return r, true, nil
+}
+
 func main() {
 	j := SdjournalReader{}
 	err := j.Open(os.Args[1])
@@ -382,26 +423,11 @@ func main() {
 	}
 
 	for true {
-		offset, err := j._next_entry_offset()
-		if err != nil || offset == uint64(0) {
+		data, hasnext, err := j.Next()
+		if ! hasnext || err != nil{
 			break
 		}
-		offsetdata, err := j._loadDataOffsetsFromEntry(offset)
-		if err != nil {
-			break
-		}
-
-		for i := 0; i < len(offsetdata); i++ {
-			buf, err := j._loadData(offsetdata[i])
-			if err != nil {
-				fmt.Println(err)
-				break
-			}
-			fmt.Println(string(buf))
-		}
-
-		fmt.Println("=========================")
-
+		fmt.Println(data)
 	}
 
 	j.Close()
