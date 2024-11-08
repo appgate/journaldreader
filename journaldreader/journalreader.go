@@ -50,8 +50,9 @@ import (
 	"github.com/edsrzf/mmap-go"
 	"github.com/klauspost/compress/zstd"
 	"os"
-	"unsafe"
+	"sort"
 	"strings"
+	"unsafe"
 )
 
 const HEADER_SIZE = 208            //struct.calcsize('<8s 2I B 7x 16s 16s 16s 16s 15Q')
@@ -372,6 +373,60 @@ func (j *SdjournalReader) Close() error {
 	j.fd.Close()
 
 	return nil
+}
+
+type journalSorter struct {
+	filename          string
+	seqnum_id         [16]byte
+	head_entry_seqnum uint64
+}
+
+/*
+ * Given a list of journal files, it sorts them in chronological
+ * order.
+ *
+ * Files that cannot be opened as journald files are skipped.
+ **/
+func SortJournalFiles(journalfiles []string) []string {
+
+	var files []journalSorter
+
+	for i := 0; i < len(journalfiles); i++ {
+		j := SdjournalReader{}
+		err := j.Open(journalfiles[i])
+		if err != nil {
+			continue
+		}
+
+		f := journalSorter{journalfiles[i], j.header.seqnum_id, j.header.head_entry_seqnum}
+		files = append(files, f)
+		j.Close()
+	}
+
+	// Sort the journald files according to the seqnum_id and then head_entry_seqnum
+	sort.Slice(files, func(i, j int) bool {
+		id_diff := compare_seqnum_id(files[i].seqnum_id, files[j].seqnum_id)
+		if id_diff != 0 {
+			return id_diff < 0
+		}
+		return files[i].head_entry_seqnum < files[j].head_entry_seqnum
+	})
+
+	var r []string
+	for i := 0; i < len(files); i++ {
+		r = append(r, files[i].filename)
+	}
+
+	return r
+}
+
+func compare_seqnum_id(a [16]byte, b [16]byte) int {
+	for i := 0; i < 16; i++ {
+		if d := int(a[i]) - int(b[i]); d != 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 /*
